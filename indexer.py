@@ -99,6 +99,8 @@ class Indexer:
 
         #save after finishing with batch
         self.save_partial(batch_id)
+        #HACK: GET NUMBER OF UNIQUE TOKENS 
+        print(len(self.inverted_index))
 
     #PARTIAL INDEX
     def save_partial(self, batch_id):
