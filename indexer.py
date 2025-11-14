@@ -12,72 +12,101 @@ from collections import defaultdict
 import time
 
 
-#Number of indexed documents
-tokenizer = RegexpTokenizer(r"\w+")
-ps = PorterStemmer()
-inverted_index = defaultdict(set)
-doc_id_to_url = []      
-root = Path("analyst")
+class Indexer:
+    def __init__(self, root_folder: str, batch_size: int = 3000):
+        self.root = Path(root_folder)
+        self.batch_size = batch_size
 
+        self.tokenizer = RegexpTokenizer(r"\w+")
+        self.stemmer = PorterStemmer()
 
-def tokenize_and_stem_unique(text: str) -> set[str]:
-    text = text.lower()
-    tokens = tokenizer.tokenize(text)
-    tokens = [t for t in tokens if t.isalpha()]
-    stems = { ps.stem(t) for t in tokens }  # set → unique stems
-    return stems
+        self.inverted_index = defaultdict(set)
+        self.doc_id_to_url = []
 
-def extract_text(html: str) -> str:
-    soup = BeautifulSoup(html, "lxml")
-    for tag in soup(["script", "style", "noscript"]):
-        tag.decompose()
-    return soup.get_text(separator=" ", strip=True)
+        self.global_doc_id = 0
 
-def index_document(doc_id: int, html: str, index):
-    text = extract_text(html)
-    stemmed_tokens = tokenize_and_stem_unique(text)
+     # TEXT PROCESSING   
 
-    for token in stemmed_tokens:
-        index[token].add(doc_id)
+    def extract_text(self, html:str) -> str:
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
+        return soup.get_text(separator=" ", strip=True)
 
-def save_index_to_disk(inverted_index, filename="inverted_index.json") -> None:
-    serializable_index = { token: list(doc_ids) for token, doc_ids in inverted_index.items() }
+    def tokenize_and_stem_unique(self, text: str) -> set[str]:
+        text = text.lower()
+        tokens = self.tokenizer.tokenize(text)
+        tokens = [t for t in tokens if t.isalpha()]
+        stems = { self.stemmer.stem(t) for t in tokens }  # set → unique stems
+        return stems
+    
+    #INDEXING SINGLE DOC
 
-    index_path = Path(filename)
-    with index_path.open("w", encoding="utf-8") as f:
-        json.dump(serializable_index, f)
+    def index_document(self, doc_id: int, html: str) -> None:
+        text = self.extract_text(html)
+        stemmed_tokens = self.tokenize_and_stem_unique(text)
 
-def save_docs_to_disk(doc_id_to_url, filename="docs.json") -> None:
-    docs_path = Path(filename)
-    with docs_path.open("w", encoding="utf-8") as f:
-        json.dump(doc_id_to_url, f)
+        for token in stemmed_tokens:
+            self.inverted_index[token].add(doc_id)
+
+    #GRAB BATCHES
+    def batch_grab(self):
+        batch = []
+        for file_path in self.root.rglob("*.json"):
+            batch.append(file_path)
+            if len(batch) == self.batch_size:
+                yield batch
+                batch = []
+        #note: trying to catch leftovers
+        if batch:
+            yield batch
+
+    #BATCH PROCESSING
+    def process_batch(self, batch_files, batch_id):
+        self.inverted_index = defaultdict(set)
+        self.doc_id_to_url = {}
+
+        for json_file in batch_files:
+            with json_file.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+
+                url = data.get("url")
+                html = data.get("content", "")
+
+                if not url or not html:
+                    continue
+
+                doc_id = self.global_doc_id
+                self.global_doc_id += 1
+
+                self.doc_id_to_url[doc_id] = url
+                self.index_document(doc_id, html)
+
+        #save after finishing with batch
+        self.save_partial(batch_id)
+
+    #PARTIAL INDEX
+    def save_partial(self, batch_id):
+        index_path = f"partial_index_{batch_id}.json"
+        docid_path = f"partial_docids_{batch_id}.json"
+
+        serializable_index = { token: list(doc_ids) for token, doc_ids in self.inverted_index.items() }
+        with open(index_path, "w") as f:
+            json.dump(serializable_index, f)
+        with open(docid_path, "w") as f:
+            json.dump(self.doc_id_to_url, f)
+
+        print(f"Saved batch {batch_id} to {index_path}")
+
+    #RUN
+    def build(self):
+        batch_id = 0
+        for batch_files in self.batch_grab():
+            print(f"Processing batch {batch_id} with {len(batch_files)} files.")
+            self.process_batch(batch_files, batch_id)
+            batch_id += 1
 
 if __name__ == "__main__":
-    start = time.perf_counter()
-
-    doc_id = 0
-    for json_file in root.rglob("*.json"):
-        with json_file.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        url = data.get("url")
-        html = data.get("content", "")
-
-        if not url or not html:
-            continue
-
-        current_id = doc_id
-        doc_id_to_url.append(url)
-        doc_id += 1
-
-        index_document(current_id, html, inverted_index)
-    
-    end = time.perf_counter()
-    elapsed = end - start
-    save_docs_to_disk(doc_id_to_url)
-    save_index_to_disk(inverted_index)
-
-    print("Unique tokens:", len(inverted_index))
-    print("Indexed Documents #: ", len(doc_id_to_url))
-    print(f"Time elapsed: {elapsed:.4f} seconds")
+    indexer = Indexer(root_folder="analyst", batch_size=3000)
+    indexer.build()
 
