@@ -19,7 +19,7 @@ class Indexer:
         self.root = Path(root_folder)
         self.batch_size = batch_size
 
-        self.tokenizer = RegexpTokenizer(r"\w+")
+        self.tokenizer = RegexpTokenizer(r"[a-zA-Z0-9\-]+")
         self.stemmer = SnowballStemmer("english") # swtiched to a faster stemmer
 
         self.inverted_index = defaultdict(list) # stores a list of posting  objects
@@ -40,7 +40,7 @@ class Indexer:
     def tokenize_and_stem(self, text: str) -> list[str]:
         text = text.lower()
         tokens = self.tokenizer.tokenize(text)
-        tokens = [t for t in tokens if t.isalpha() if t.isalpha()] 
+        tokens = [t for t in tokens] 
         stems = [self.stemmer.stem(t) for t in tokens]
         return stems
     
@@ -92,15 +92,13 @@ class Indexer:
                     continue
 
                 doc_id = self.global_doc_id
-                self.global_doc_id += 1
+                self.global_doc_id += 1 
 
                 self.doc_id_to_url[doc_id] = url
                 self.index_document(doc_id, html)
 
         #save after finishing with batch
         self.save_partial(batch_id)
-        #HACK: GET NUMBER OF UNIQUE TOKENS 
-        print(len(self.inverted_index))
 
     #PARTIAL INDEX
     def save_partial(self, batch_id):

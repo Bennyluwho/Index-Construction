@@ -20,3 +20,6 @@ if __name__ == "__main__":
     indexer = Indexer(root_folder="DEV", batch_size=60000)
     indexer.build()
   
+    print(f"Number of indexed pages:", indexer.global_doc_id)
+    #HACK: QUICK FIX, WONT WONT WITH UNMERGED PARTIAL INDEXES
+    print(f"Number of unique tokens:", len(indexer.inverted_index))
